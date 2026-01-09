@@ -1,0 +1,87 @@
+name: Windows Build
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    permissions:
+      contents: read
+      
+    strategy:
+      matrix:
+        node-version: [20.x]
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Generate Prisma Client
+      run: npm run prisma:generate
+    
+    - name: Run linter
+      run: npm run lint
+      continue-on-error: true
+    
+    - name: Run type check
+      run: npm run type-check
+    
+    - name: Build Next.js application
+      run: npm run build
+      env:
+        NODE_ENV: production
+    
+    - name: Build Electron app for Windows
+      run: npm run package:win
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: List build artifacts
+      run: |
+        dir dist
+        if (Test-Path "dist/*.exe") {
+          Write-Host "Build artifacts found:"
+          Get-ChildItem dist/*.exe | ForEach-Object { Write-Host $_.Name }
+        } else {
+          Write-Host "No .exe files found in dist directory"
+          Write-Host "Contents of dist directory:"
+          Get-ChildItem dist -Recurse
+        }
+      shell: pwsh
+    
+    - name: Upload Windows build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: claudable-windows-x64
+        path: |
+          dist/*.exe
+          dist/*.yml
+        retention-days: 30
+        if-no-files-found: error
+    
+    - name: Upload build logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: |
+          npm-debug.log*
+          yarn-error.log*
+          .next/
+        retention-days: 7
+        if-no-files-found: ignore
